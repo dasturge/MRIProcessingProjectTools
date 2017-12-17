@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import multiprocessing as mp
 import subprocess
@@ -9,6 +10,23 @@ from skimage import measure
 from funclib import *
 
 
+def cli():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("images", metavar="IMGPATH", type=str, nargs="+", help="path(s) to T2w to be brain extracted")
+    args = parser.parse_args()
+
+    dirname = None
+    for image in args.images:
+        if not dirname:
+            dirname = os.path.dirname(image)
+            continue
+        if dirname != os.path.dirname(image):
+            sys.stderr.write('All images must exist in the same directory. Exiting...')
+            sys.exit(1)
+
+    return args
+
+
 def main():
     """
     functions are found in funclib.py, most image operations
@@ -17,16 +35,16 @@ def main():
     """
     # Script uses ANTs Advanced Normalization Tools for denoising and bias field correction
     # Pycharm is not evaluating my ~/.bashrc if not launched from the terminal, so...
-    os.putenv('PATH', os.environ['PATH'] + ':/usr/local/ANTs/bin')
-    # this is for my setup, any way you want to pass in a list of images
-    home = os.getenv('HOME', '/wat')
-    os.chdir(home + '/PycharmProjects/ImageProcessing')
-    t2ws = os.listdir('T2w')
-    t2ws = [f for f in t2ws if f[-8:]=='1.nii.gz']
-    os.chdir('T2w')
+    args = cli()
+    t2ws = [os.path.basename(t2w) for t2w in args.images]
+    dirname = os.path.dirname(args.images[0])
+    os.chdir(dirname)
     # use em if you got em
-    with mp.Pool(processes=mp.cpu_count()) as pool:
-        pool.map(T2w_skullstrip_pipeline, t2ws)
+    if len(t2ws) > 1:
+        with mp.Pool(processes=len(t2ws)) as pool:
+            pool.map(T2w_skullstrip_pipeline, t2ws)
+    else:
+        T2w_skullstrip_pipeline(t2ws[0])
 
 
 def T2w_skullstrip_pipeline(img_name):
@@ -74,7 +92,7 @@ def T2w_skullstrip_pipeline(img_name):
     rois = np.where(otsu != 3, 0, 1)
 
     # get largest contiguous region
-    labels = measure.label(rois, connectivity=1)  # @todo this is from the skimage package
+    labels = measure.label(rois, neighbors=4)  # @todo this is from the skimage package
     roi = largest_roi(labels)
 
     # morphological close operation on binary mask
