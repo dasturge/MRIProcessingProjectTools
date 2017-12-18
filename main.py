@@ -11,8 +11,12 @@ from funclib import *
 
 
 def cli():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser("Runs Otsus Method and Morphological Operations to skull strip neonatal T2w images."
+                                     "  Will process subjects in parallel but does not read any additional options"
+                                     " in that case.")
     parser.add_argument("images", metavar="IMGPATH", type=str, nargs="+", help="path(s) to T2w to be brain extracted")
+    parser.add_argument("--no-preproc", dest="useANTs", action="store_false")
+    parser.set_defaults(useANTs=True)
     args = parser.parse_args()
 
     dirname = None
@@ -35,34 +39,37 @@ def main():
     """
     # Script uses ANTs Advanced Normalization Tools for denoising and bias field correction
     # Pycharm is not evaluating my ~/.bashrc if not launched from the terminal, so...
-    args = cli()
+    args = cli() # read in command line arguments
     t2ws = [os.path.basename(t2w) for t2w in args.images]
     dirname = os.path.dirname(args.images[0])
-    os.chdir(dirname)
-    # use em if you got em
+    os.chdir(dirname) # outputs will be in same directory as targets
+
     if len(t2ws) > 1:
-        with mp.Pool(processes=len(t2ws)) as pool:
+        # parellelized if need be
+        ncores = len(t2ws) if mp.cpu_count() > len(t2ws) else mp.cpu_count()
+        with mp.Pool(processes=ncores) as pool:
             pool.map(T2w_skullstrip_pipeline, t2ws)
     else:
-        T2w_skullstrip_pipeline(t2ws[0])
+        T2w_skullstrip_pipeline(t2ws[0], useANTs=args.useANTs)
 
 
-def T2w_skullstrip_pipeline(img_name):
+def T2w_skullstrip_pipeline(img_name, **kwargs):
 
-    subprocess.check_call("command -v ANTS", shell=True)
     if img_name[-7:] == '.nii.gz':
         img_name = img_name[:-7]
 
-    # skip preprocessing if files already exist
-    if os.path.isfile(img_name + '_dn_bf.nii.gz'):
+    useANTs = kwargs.get('useANTs', True)
+    if useANTs and os.path.isfile(img_name + '_dn_bf.nii.gz'):
         img_name = img_name + '_dn_bf'
-    else:
+    elif useANTs:
+        subprocess.check_call("command -v DenoiseImage", shell=True)
         # run Rician denoising
         cmd = ['DenoiseImage', '-d', '3', '-i', img_name + '.nii.gz',
                '-v', '-o', img_name + '_dn' + '.nii.gz']
         subprocess.call(" ".join(cmd), shell=True)
         img_name = img_name + '_dn'
 
+        subprocess.check_call("command -v N4BiasFieldCorrection", shell=True)
         # run Bias Field (inhomogeneity) correction
         cmd = ['N4BiasFieldCorrection', '-d', '3', '-i', img_name + '.nii.gz',
                '-v', '-o', img_name + '_bf' + '.nii.gz']
@@ -100,11 +107,17 @@ def T2w_skullstrip_pipeline(img_name):
 
     brain = arr * brainmask
 
+    # threshold max radial distance based on histogram
+    center = cm(brainmask)
+    rad = radial_distance(brainmask, center)
+    radhist, edges = np.histogram(rad.flatten(), bins=200)
+    idx = np.argmax(radhist[50:]<50) + 50
+    brain = np.where(rad < edges[idx], brain, 0)
+
     nii_save_like(brain, img, img_name + '_brain' + '.nii.gz')
 
 
 if __name__ == '__main__':
-    # Ideally there would be shell compatible exit statuses, but there's no python guide for this
+    # Ideally there would be shell compatible exit statuses, but I haven't found the python guide for this
     main()
     sys.exit(0)
-

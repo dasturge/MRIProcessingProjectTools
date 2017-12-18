@@ -21,6 +21,9 @@ def partitions(items, k):
     for indices in combinations(range(1, len(items)), k-1):
         yield list(split(indices))
 
+def slices(indices, lengths):
+    return [slice(i, i+j) for i, j in zip(indices, lengths)]
+
 
 # UNUSED
 def DoG(array, sigma1, sigma2=None):
@@ -38,16 +41,15 @@ def erode(arr, structure):
     :return: eroded mask of data
     """
     dims = arr.shape
-    field = structure.shape
-    f1 = int((field[0] - 1) / 2)
-    f2 = int((field[1] - 1) / 2)
-    f3 = int((field[2] - 1) / 2)
-    padarr = np.pad(arr, [(f1, f1), (f2, f2), (f3, f3)], mode='constant', constant_values=0)
+    field = np.array(structure.shape)
+    flen = (field - 1) / 2
+    flen = flen.astype(int)
+    padarr = np.pad(arr, [(x,x) for x in flen], mode='constant', constant_values=0)
     padarr = padarr.astype(np.bool)
     arr = np.zeros_like(arr, dtype=np.bool)
-    for i, j, k in product(range(dims[0]), range(dims[1]), range(dims[2])):
-        ele = padarr[i:i + field[0], j:j + field[0], k:k + field[0]]
-        arr[i, j, k] = np.all(ele[structure] * structure[structure])
+    for indices in np.ndindex(dims):
+        ele = padarr[slices(indices, field)]
+        arr[indices] = np.all(ele[structure] * structure[structure])
 
     return arr.astype(np.int8)
 
@@ -60,17 +62,15 @@ def dilate(arr, structure):
     :return: dilated mask of data
     """
     dims = arr.shape
-    field = structure.shape
-    f1 = int((field[0] - 1) / 2)
-    f2 = int((field[1] - 1) / 2)
-    f3 = int((field[2] - 1) / 2)
-    padarr = np.pad(arr, [(f1, f1), (f2, f2), (f3, f3)], mode='constant', constant_values=0)
+    field = np.array(structure.shape)
+    flen = (field - 1) / 2
+    flen = flen.astype(int)
+    padarr = np.pad(arr, [(x,x) for x in flen], mode='constant', constant_values=0)
     padarr = padarr.astype(np.bool)
     arr = np.zeros_like(arr, dtype=np.bool)
-
-    for i, j, k in product(range(dims[0]), range(dims[1]), range(dims[2])):
-        ele = padarr[i:i + field[0], j:j + field[0], k:k + field[0]]
-        arr[i, j, k] = np.any(ele[structure] * structure[structure])
+    for indices in np.ndindex(dims):
+        ele = padarr[slices(indices, field)]
+        arr[indices] = np.any(ele[structure] * structure[structure])
 
     return arr.astype(np.int8)
 
@@ -191,17 +191,16 @@ def cm(arr):
     :return: floating point approximation of center of mass
     """
     dims = arr.shape
-    x = y = z = mass = 0
+    moment = np.zeros_like(dims)
+    mass = 0
 
-    for i, j, k in product(range(dims[0]), range(dims[1]), range(dims[2])):
-        if not arr[i, j, k]:
+    for indices in np.ndindex(dims):
+        if not arr[indices]:
             continue
-        mass = mass + arr[i, j, k]
-        x = x + i * arr[i, j, k]
-        y = y + j * arr[i, j, k]
-        z = z + k * arr[i, j, k]
+        mass = mass + arr[indices]
+        moment = moment + np.array(indices) * arr[indices]
 
-    center = np.array([x, y, z]) / mass
+    center = moment / mass
 
     return center
 
@@ -215,8 +214,8 @@ def radial_distance(arr, point):
     """
     dims = arr.shape
     distance = np.zeros_like(arr)
-    for idx in np.ndindex(dims):
-        if arr[idx]:
-            distance[idx] = np.sqrt(np.sum((np.array(idx) - point)**2))
+    for indices in np.ndindex(dims):
+        if arr[indices]:
+            distance[indices] = np.sqrt(np.sum((np.array(indices) - point)**2))
 
     return distance
